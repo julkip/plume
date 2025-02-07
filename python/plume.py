@@ -1,8 +1,13 @@
+import os
+
 import click
+import git
 import toml
-from git import Repo
 
 FILE_PATH = "plume.toml"
+PLUGIN_PATH = (
+    "/home/julkip/.local/share/nvim/plume-plugins"  # TODO: XDG_DATA_HOME benutzen
+)
 
 
 def load_plugins():
@@ -29,7 +34,7 @@ def plume():
 def _get_name(url, name):
     if name:
         return name
-    localname = url.split("/")[-1]
+    localname = url.split("/")[-1].removesuffix(".git")
     return localname
 
 
@@ -54,7 +59,7 @@ def _update_url_store(update_url, url, name, commit):
 @click.option(
     "-c",
     "--commit",
-    default="latest",
+    default="HEAD",
     type=click.STRING,
     required=False,
     help="Optional. Commit/Tag/Branch des Plugins.",
@@ -63,8 +68,7 @@ def _update_url_store(update_url, url, name, commit):
 # - [x] Den Namen als letzten Part der URL extrahieren und separat abspeichern
 # - [x] Optionaler Parameter für den checkout (branch, tag, commit…)
 # - [x] Plugin updaten, wenn sich der Name oder der commit ändert
-def add(url, name="", commit="latest"):
-    print(commit)
+def add(url, name="", commit="HEAD"):
     localname = _get_name(url, name)
     update_url = False
     for entry in url_store:
@@ -78,6 +82,9 @@ def add(url, name="", commit="latest"):
                 return
             else:
                 update_url = True
+    if commit == "HEAD":  # Get commit for current HEAD
+        repo = git.cmd.Git()
+        commit = repo.ls_remote(url).splitlines()[0][:7]
     _update_url_store(update_url, url, localname, commit)
     save_urls(url_store)
     click.echo(f"Das Plugin {url} wurde hinzugefügt.")
@@ -107,11 +114,34 @@ def show():
         click.echo("Es sind keine Plugins installiert.")
 
 
+@click.command()
+def sync():
+    for plugin in url_store:
+        if not os.path.exists(PLUGIN_PATH + "/" + plugin["name"]):
+            click.echo(f"Plugin {plugin} wird installiert")
+            repo = git.Repo.clone_from(plugin["url"], f"{PLUGIN_PATH}/{plugin["name"]}")
+            repo.commit(plugin["commit"])
+
+
+@click.command()
+def update():
+    for plugin in url_store:
+        if os.path.exists(PLUGIN_PATH + "/" + plugin["name"]):
+            click.echo(f"Plugin {plugin} wird aktualisiert")
+            repo = git.Repo(PLUGIN_PATH + "/" + plugin["name"])
+            o = repo.remotes.origin
+            o.pull()
+            repo.commit(plugin["commit"])
+
+
 # TODO:
-# [ ] neues Kommando sync zum installierten der Plugins
-# [ ] neues Kommando update zum aktualisieren der Plugins
+# [ ] Pluginverzeichnis anlegen, wenn nicht vorhanden
+# [-] neues Kommando sync zum installierten der Plugins
+# [-] neues Kommando update zum aktualisieren der Plugins
+# [ ] neues Kommando clean zum entfernen nicht gelisteter Plugins
 # [ ] neues Kommando freeze mit optionalen parametern name und commit zum nachträglichen
-#     Festsetzen
+#     Festsetzen Sub-TODO: macht das überhaupt sinn? oder brauche ich dann ein freeze
+#     flag, damit diese Plugins von Update ignoriert werden?
 # [ ] Konfiguration aus plume.toml einlesen
 # [ ] Standardkonfiguration erzeugen, wenn plume.toml nicht vorhanden ist
 
@@ -120,4 +150,6 @@ if __name__ == "__main__":
     plume.add_command(add)
     plume.add_command(remove)
     plume.add_command(show)
+    plume.add_command(sync)
+    plume.add_command(update)
     plume()
