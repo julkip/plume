@@ -1,25 +1,44 @@
-import os
+import os  # TODO: Pathlib
 
 import click
 import git
 import toml
 
-FILE_PATH = "plume.toml"
-PLUGIN_PATH = (
-    "/home/julkip/.local/share/nvim/plume-plugins"  # TODO: XDG_DATA_HOME benutzen
+config_file = (
+    "/home/julkip/.config/plume/config.toml"  # TODO: auch hier xdg_config_home benutzen
 )
+default_config = {
+    "install_path": "/home/julkip/.local/share/nvim/plume-plugins",
+    "plugin_file": "/home/julkip/.config/plume/plugins.toml",
+}  # TODO: XDG_DATA_HOME und XDG_CONFIG_HOME benutzen
+config = {}
+
+
+def _read_config(path):
+    try:
+        data = toml.load(path)
+        if "config" in data:
+            return data.get("config")
+        else:
+            with open("config_file", "w") as file:
+                toml.dump({"config": default_config}, file)
+            return default_config
+    except FileNotFoundError:
+        with open("config_file", "w") as file:
+            toml.dump({"config": default_config}, file)
+        return default_config
 
 
 def load_plugins():
     try:
-        data = toml.load(FILE_PATH)
+        data = toml.load(config["plugin_file"])
         return data.get("plugins", [])
     except FileNotFoundError:
         return []
 
 
 def save_urls(plugins):
-    with open(FILE_PATH, "w") as file:
+    with open(config["plugin_file"], "w") as file:
         toml.dump({"plugins": list(plugins)}, file)
 
 
@@ -28,7 +47,8 @@ url_store = load_plugins()
 
 @click.group()
 def plume():
-    pass
+    global config
+    config = _read_config(config_file)
 
 
 def _get_name(url, name):
@@ -64,10 +84,6 @@ def _update_url_store(update_url, url, name, commit):
     required=False,
     help="Optional. Commit/Tag/Branch des Plugins.",
 )
-# TODO:
-# - [x] Den Namen als letzten Part der URL extrahieren und separat abspeichern
-# - [x] Optionaler Parameter für den checkout (branch, tag, commit…)
-# - [x] Plugin updaten, wenn sich der Name oder der commit ändert
 def add(url, name="", commit="HEAD"):
     localname = _get_name(url, name)
     update_url = False
@@ -117,18 +133,20 @@ def show():
 @click.command()
 def sync():
     for plugin in url_store:
-        if not os.path.exists(PLUGIN_PATH + "/" + plugin["name"]):
+        if not os.path.exists(config["install_path"] + "/" + plugin["name"]):
             click.echo(f"Plugin {plugin} wird installiert")
-            repo = git.Repo.clone_from(plugin["url"], f"{PLUGIN_PATH}/{plugin["name"]}")
+            repo = git.Repo.clone_from(
+                plugin["url"], f"{config["install_path"]}/{plugin["name"]}"
+            )
             repo.commit(plugin["commit"])
 
 
 @click.command()
 def update():
     for plugin in url_store:
-        if os.path.exists(PLUGIN_PATH + "/" + plugin["name"]):
+        if os.path.exists(config["install_path"] + "/" + plugin["name"]):
             click.echo(f"Plugin {plugin} wird aktualisiert")
-            repo = git.Repo(PLUGIN_PATH + "/" + plugin["name"])
+            repo = git.Repo(config["install_path"] + "/" + plugin["name"])
             o = repo.remotes.origin
             o.pull()
             repo.commit(plugin["commit"])
